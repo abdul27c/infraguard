@@ -41,28 +41,3 @@ jobs:
 
       - name: Verify safe plan passes
         run: python -m infraguard.cli tests/fixtures/safe-plan.json
-YAML
-
-cat > README.md <<'EOF'
-# InfraGuard — Infrastructure Security Gate
-
-InfraGuard is a Python-based security scanner that evaluates Terraform plan
-JSON against an initial set of AWS infrastructure security rules.
-
-## Current checks
-
-- **IG-SG-001:** Flags public ingress to SSH, RDP, or all protocols.
-- **IG-S3-001:** Flags selected public S3 bucket ACLs.
-- **IG-IAM-001:** Flags IAM policies allowing all actions on all resources.
-
-## Requirements
-
-- Python 3.10+
-- Terraform, to generate a real plan JSON file
-
-## Setup
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
