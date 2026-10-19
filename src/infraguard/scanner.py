@@ -1,3 +1,4 @@
+
 """Scan Terraform plan JSON for infrastructure security findings."""
 
 import json
@@ -19,6 +20,13 @@ SUPPORTED_RULES = {
 }
 
 
+def _require_dict(value: Any, description: str) -> dict[str, Any]:
+    """Require a JSON object and provide a clear validation error."""
+    if not isinstance(value, dict):
+        raise ValueError(f"{description} must be a JSON object.")
+    return value
+
+
 def _scan_resource(resource: dict[str, Any]) -> list[Finding]:
     """Run applicable checks against one Terraform resource."""
     check = SUPPORTED_RULES.get(resource.get("type"))
@@ -28,57 +36,88 @@ def _scan_resource(resource: dict[str, Any]) -> list[Finding]:
 
 
 def scan_plan(plan: dict[str, Any]) -> list[Finding]:
-    """Scan final planned resources and account for resource actions."""
-    findings: list[Finding] = []
+    """Scan planned resources and changed resource after-values."""
+    _require_dict(plan, "Terraform plan")
+
     planned_values = plan.get("planned_values") or {}
+    planned_values = _require_dict(planned_values, "planned_values")
+
     root_module = planned_values.get("root_module") or {}
+    root_module = _require_dict(
+        root_module, "planned_values.root_module"
+    )
 
-    # Record resources explicitly scheduled for deletion. They should not
-    # be assessed as though they will remain in the final infrastructure.
-    deleted_addresses = set()
     resource_changes = plan.get("resource_changes") or []
+    if not isinstance(resource_changes, list):
+        raise ValueError("resource_changes must be a JSON array.")
 
-    for item in resource_changes:
-        if not isinstance(item, dict):
-            continue
-        change = item.get("change") or {}
+    deleted_addresses: set[str] = set()
+
+    for index, item in enumerate(resource_changes):
+        item = _require_dict(item, f"resource_changes[{index}]")
+        change = _require_dict(
+            item.get("change") or {},
+            f"resource_changes[{index}].change",
+        )
         actions = change.get("actions") or []
-        after = change.get("after")
 
-        if "delete" in actions and after is None:
-            deleted_addresses.add(item.get("address"))
+        if not isinstance(actions, list):
+            raise ValueError(
+                f"resource_changes[{index}].change.actions "
+                "must be a JSON array."
+            )
 
+        if "delete" in actions and change.get("after") is None:
+            address = item.get("address")
+            if isinstance(address, str):
+                deleted_addresses.add(address)
+
+    findings: list[Finding] = []
     seen: set[tuple[str, str]] = set()
 
-    def visit_module(module: dict[str, Any]) -> None:
-        for resource in module.get("resources") or []:
-            if not isinstance(resource, dict):
-                continue
+    def visit_module(module: dict[str, Any], description: str) -> None:
+        resources = module.get("resources") or []
+        children = module.get("child_modules") or []
 
+        if not isinstance(resources, list):
+            raise ValueError(f"{description}.resources must be a JSON array.")
+        if not isinstance(children, list):
+            raise ValueError(
+                f"{description}.child_modules must be a JSON array."
+            )
+
+        for index, resource in enumerate(resources):
+            resource = _require_dict(
+                resource, f"{description}.resources[{index}]"
+            )
             address = resource.get("address", "unknown")
             resource_type = resource.get("type", "unknown")
+
+            if not isinstance(address, str) or not isinstance(
+                resource_type, str
+            ):
+                raise ValueError(
+                    f"{description}.resources[{index}] must have "
+                    "string address and type fields."
+                )
 
             if address in deleted_addresses:
                 continue
 
             key = (address, resource_type)
-            if key in seen:
-                continue
-            seen.add(key)
-            findings.extend(_scan_resource(resource))
+            if key not in seen:
+                seen.add(key)
+                findings.extend(_scan_resource(resource))
 
-        for child in module.get("child_modules") or []:
-            if isinstance(child, dict):
-                visit_module(child)
+        for index, child in enumerate(children):
+            child = _require_dict(
+                child, f"{description}.child_modules[{index}]"
+            )
+            visit_module(child, f"{description}.child_modules[{index}]")
 
-    visit_module(root_module)
+    visit_module(root_module, "planned_values.root_module")
 
-    # Also inspect changed resources' after-values. This covers plan JSON
-    # where a resource change is present but not represented in planned_values.
-    for item in resource_changes:
-        if not isinstance(item, dict):
-            continue
-
+    for index, item in enumerate(resource_changes):
         change = item.get("change") or {}
         actions = change.get("actions") or []
         after = change.get("after")
@@ -90,8 +129,16 @@ def scan_plan(plan: dict[str, Any]) -> list[Finding]:
 
         address = item.get("address", "unknown")
         resource_type = item.get("type", "unknown")
-        key = (address, resource_type)
 
+        if not isinstance(address, str) or not isinstance(
+            resource_type, str
+        ):
+            raise ValueError(
+                f"resource_changes[{index}] must have "
+                "string address and type fields."
+            )
+
+        key = (address, resource_type)
         if key in seen:
             continue
 

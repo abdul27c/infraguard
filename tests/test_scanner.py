@@ -1,3 +1,4 @@
+
 import unittest
 from pathlib import Path
 
@@ -70,6 +71,97 @@ class ScannerTests(unittest.TestCase):
             }],
         }
         self.assertEqual(scan_plan(plan), [])
+
+    def test_scans_insecure_resource_in_nested_module(self):
+        plan = {
+            "planned_values": {
+                "root_module": {
+                    "resources": [],
+                    "child_modules": [{
+                        "resources": [{
+                            "address": "module.network.aws_security_group.web",
+                            "type": "aws_security_group",
+                            "values": {
+                                "ingress": [{
+                                    "from_port": 22,
+                                    "to_port": 22,
+                                    "protocol": "tcp",
+                                    "cidr_blocks": ["0.0.0.0/0"],
+                                }]
+                            },
+                        }]
+                    }],
+                }
+            }
+        }
+        findings = scan_plan(plan)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].rule_id, "IG-SG-001")
+
+    def test_scans_insecure_replacement_resource(self):
+        plan = {
+            "planned_values": {"root_module": {"resources": []}},
+            "resource_changes": [{
+                "address": "aws_security_group.replaced",
+                "type": "aws_security_group",
+                "change": {
+                    "actions": ["delete", "create"],
+                    "before": {},
+                    "after": {
+                        "ingress": [{
+                            "from_port": 22,
+                            "to_port": 22,
+                            "protocol": "tcp",
+                            "cidr_blocks": ["0.0.0.0/0"],
+                        }]
+                    },
+                },
+            }],
+        }
+        findings = scan_plan(plan)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].rule_id, "IG-SG-001")
+
+    def test_does_not_duplicate_planned_and_changed_resource(self):
+        plan = {
+            "planned_values": {
+                "root_module": {
+                    "resources": [{
+                        "address": "aws_security_group.web",
+                        "type": "aws_security_group",
+                        "values": {
+                            "ingress": [{
+                                "from_port": 22,
+                                "to_port": 22,
+                                "protocol": "tcp",
+                                "cidr_blocks": ["0.0.0.0/0"],
+                            }]
+                        },
+                    }]
+                }
+            },
+            "resource_changes": [{
+                "address": "aws_security_group.web",
+                "type": "aws_security_group",
+                "change": {
+                    "actions": ["update"],
+                    "after": {
+                        "ingress": [{
+                            "from_port": 22,
+                            "to_port": 22,
+                            "protocol": "tcp",
+                            "cidr_blocks": ["0.0.0.0/0"],
+                        }]
+                    },
+                },
+            }],
+        }
+        findings = scan_plan(plan)
+        self.assertEqual(len(findings), 1)
+
+    def test_rejects_invalid_planned_values_structure(self):
+        with self.assertRaises(ValueError):
+            scan_plan({"planned_values": "invalid"})
 
 
 if __name__ == "__main__":
