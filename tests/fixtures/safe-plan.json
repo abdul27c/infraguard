@@ -1,0 +1,31 @@
+{
+  "format_version": "1.2",
+  "planned_values": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_security_group.private_app",
+          "type": "aws_security_group",
+          "values": {
+            "ingress": [
+              {
+                "from_port": 443,
+                "to_port": 443,
+                "protocol": "tcp",
+                "cidr_blocks": ["10.0.0.0/8"],
+                "ipv6_cidr_blocks": []
+              }
+            ]
+          }
+        },
+        {
+          "address": "aws_s3_bucket.private_bucket",
+          "type": "aws_s3_bucket",
+          "values": {
+            "acl": "private"
+          }
+        }
+      ]
+    }
+  }
+}
